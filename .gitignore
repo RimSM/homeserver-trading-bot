@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Env & secrets (KIS/Toss keys never committed)
+.env
+kis_devlp.yaml
+*.key
+
+# Data & local ledger
+*.sqlite
+*.db
+data/
+logs/
+
+# OS / IDE
+.DS_Store
