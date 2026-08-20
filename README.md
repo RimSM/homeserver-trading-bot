@@ -38,6 +38,41 @@ tests/
 docs/
 ```
 
+## KIS WebSocket feed (첫 구현)
+
+`feeds/kis_ws.py`는 KIS 해외주식 `HDFSCNT0` 체결가 원문을 공통 `Tick`으로
+변환하는 어댑터다. 이 단계는 화면 출력·파일 저장·전략·주문을 수행하지 않는다.
+
+```bash
+uv sync --group dev
+uv run pytest
+```
+
+실제 연결은 `.env`를 환경 변수로 주입한 뒤 사용한다. `tr_key`는 티커만이 아니라
+KIS 거래소 접두어가 붙은 코드여야 한다. 종목의 정확한 거래소는 KIS 종목 조회에서
+확인한다.
+
+> 보안 주의: KIS 공식 예제의 WebSocket 주소는 현재 `ws://`이며, 구독 메시지에는
+> 단기 승인키가 포함된다. 이 단계의 운용 범위는 신뢰할 수 있는 네트워크에서의
+> `stage` 검증이다. 실전 환경에 쓰기 전 KIS의 `wss://` 지원 여부와 최신 보안
+> 가이드를 반드시 확인한다.
+
+```python
+from tbot.feeds.kis_ws import KISOverseasSymbol, KISWebSocketFeed
+
+feed = KISWebSocketFeed.from_env(
+    [KISOverseasSymbol(symbol="SOXL", tr_key="<KIS의 SOXL 구독키>")]
+)
+
+async for tick in feed.stream():
+    # 다음 단계: 화면 표시, 파일 저장, 또는 전략 입력
+    print(tick)
+```
+
+```bash
+uv run --env-file .env python your_consumer.py
+```
+
 ## 참고
 - KIS 공식 샘플: https://github.com/koreainvestment/open-trading-api (`kis_auth.py` 재사용)
 - 토스 Open API: https://openapi.tossinvest.com (단계적 롤아웃, 발급 대기)

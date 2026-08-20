@@ -1,0 +1,30 @@
+[project]
+name = "trading-bot"
+version = "0.1.0"
+description = "Stage-first automated trading pipeline"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "websockets>=15,<17",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+    "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tbot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
