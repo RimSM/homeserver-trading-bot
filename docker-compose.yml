@@ -1,0 +1,40 @@
+# trading-bot의 실시간 Landing 수집기. 공용 MinIO는 infra Compose가 소유하며,
+# 이 서비스는 기존 external network로만 연결한다.
+name: trading-bot
+
+services:
+  landing-collector:
+    build: .
+    image: trading-bot-landing:local
+    container_name: trading-bot-landing-collector
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      KIS_ENV: ${KIS_ENV:-paper}
+      KIS_APP_KEY: ${KIS_APP_KEY:?KIS_APP_KEY를 .env에 설정하세요}
+      KIS_APP_SECRET: ${KIS_APP_SECRET:?KIS_APP_SECRET을 .env에 설정하세요}
+      KIS_SYMBOL: ${KIS_SYMBOL:-TQQQ}
+      KIS_TR_KEY: ${KIS_TR_KEY:?KIS_TR_KEY를 .env에 설정하세요}
+      # 실행 환경별 endpoint는 .env가 결정한다.
+      # 실제 MinIO가 같은 Docker network에 있으면 http://minio:9000,
+      # 개발 맥에서는 https://s3.rimsm.com처럼 외부 S3 endpoint를 쓴다.
+      MINIO_ENDPOINT_URL: ${MINIO_ENDPOINT_URL:?MINIO_ENDPOINT_URL을 .env에 설정하세요}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY를 .env에 설정하세요}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY를 .env에 설정하세요}
+      MINIO_BUCKET: ${MINIO_BUCKET:-trading-bot}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      TBOT_LANDING_MAX_RECORDS: ${TBOT_LANDING_MAX_RECORDS:-50000}
+      TBOT_LANDING_FLUSH_SECONDS: ${TBOT_LANDING_FLUSH_SECONDS:-300}
+    networks:
+      - home-server-network
+    mem_limit: 256m
+
+networks:
+  home-server-network:
+    external: true
