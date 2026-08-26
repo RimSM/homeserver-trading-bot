@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 
@@ -55,7 +55,7 @@ StrategyId = str
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ──────────────────────────────────────────────
@@ -127,8 +127,8 @@ class Fill:
 class Position:
     strategy_id: StrategyId
     symbol: str
-    qty: Decimal = Decimal("0")        # 보유 수량 (소수점)
-    avg_price: Decimal = Decimal("0")  # 평균 단가 (평단)
+    qty: Decimal = Decimal(0)        # 보유 수량 (소수점)
+    avg_price: Decimal = Decimal(0)  # 평균 단가 (평단)
 
     @property
     def cost_basis(self) -> Decimal:
