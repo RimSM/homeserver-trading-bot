@@ -15,6 +15,7 @@ from tbot.feeds.kis_ws import (
     KISWebSocketFeed,
     build_subscribe_message,
     parse_hdfscnt0,
+    parse_hdfscnt0_events,
 )
 
 
@@ -73,6 +74,20 @@ def test_parse_hdfscnt0_supports_multiple_ticks_in_one_frame() -> None:
         ("SOXL", Decimal("42.75")),
         ("TQQQ", Decimal("81.10")),
     ]
+
+
+def test_parse_hdfscnt0_events_keeps_per_tick_source_fields_and_received_at() -> None:
+    received_at = datetime(2026, 8, 13, 13, 31, tzinfo=UTC)
+
+    events = parse_hdfscnt0_events(
+        f"0|{HDFSCNT0}|2|{hdfscnt0_row()}^{hdfscnt0_row(symbol='TQQQ', price='81.10')}",
+        received_at=received_at,
+    )
+
+    assert [event.tick.symbol for event in events] == ["SOXL", "TQQQ"]
+    assert all(event.received_at == received_at for event in events)
+    assert events[0].source_field_map["LAST"] == "42.75"
+    assert events[1].source_field_map["SYMB"] == "TQQQ"
 
 
 @pytest.mark.parametrize(

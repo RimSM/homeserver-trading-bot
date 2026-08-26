@@ -1,8 +1,9 @@
 """KIS 해외주식 실시간지연체결가(HDFSCNT0) WebSocket 어댑터.
 
 KIS가 보내는 원문은 ``0|HDFSCNT0|건수|필드1^필드2^...`` 형태다. 이 모듈은
-그 거래소 프로토콜을 이 프로젝트의 불변 ``Tick`` 이벤트로만 바꾼다. 저장,
-화면 표시, 전략 실행과 주문은 이 모듈의 책임이 아니다.
+그 거래소 프로토콜을 이 프로젝트의 불변 ``Tick`` 이벤트로 바꾼다. Landing
+저장 경로에는 원본 필드를 보존한 ``KISTickEvent``도 제공한다. 화면 표시, 전략
+실행과 주문은 이 모듈의 책임이 아니다.
 """
 
 from __future__ import annotations
@@ -158,6 +159,33 @@ class KISEndpoints:
         )
 
 
+@dataclass(frozen=True)
+class KISTickEvent:
+    """Landing 저장을 위한 KIS Tick 이벤트 봉투.
+
+    ``Tick``은 전략이 소비하는 최소 공통 모델이고, 이 타입은 Landing 재처리에
+    필요한 KIS 원본 필드와 실제 수신 시각을 더한다. WebSocket frame 하나에는
+    여러 Tick이 있을 수 있지만, 각 Tick은 독립 이벤트가 된다.
+
+    구독 요청과 approval key는 이 타입에 포함하지 않는다.
+    """
+
+    tick: Tick
+    received_at: datetime
+    source_fields: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        if self.received_at.tzinfo is None:
+            raise KISProtocolError("KIS Tick received_at은 timezone-aware datetime이어야 합니다.")
+        object.__setattr__(self, "received_at", self.received_at.astimezone(UTC))
+
+    @property
+    def source_field_map(self) -> dict[str, str]:
+        """Landing JSON으로 직렬화하기 쉬운 KIS 원본 필드 사본."""
+
+        return dict(self.source_fields)
+
+
 class KISWebSocketFeed(Feed):
     """KIS HDFSCNT0 체결가를 ``Tick``으로 스트리밍한다.
 
@@ -211,7 +239,13 @@ class KISWebSocketFeed(Feed):
             await self._connection.close()
 
     async def stream(self) -> AsyncIterator[Tick]:
-        """KIS에 연결해 HDFSCNT0 데이터를 ``Tick``으로 내보낸다."""
+        """KIS에 연결해 전략 호환 ``Tick``만 내보낸다."""
+
+        async for event in self.stream_events():
+            yield event.tick
+
+    async def stream_events(self) -> AsyncIterator[KISTickEvent]:
+        """KIS에 연결해 Landing 저장용 이벤트 봉투를 내보낸다."""
 
         self._stopping = False
         delay = self._reconnect_delay_seconds
@@ -230,8 +264,9 @@ class KISWebSocketFeed(Feed):
 
                     async for raw in connection:
                         if raw.startswith("0|"):
-                            for tick in parse_hdfscnt0(raw):
-                                yield tick
+                            received_at = datetime.now(UTC)
+                            for event in parse_hdfscnt0_events(raw, received_at=received_at):
+                                yield event
                         else:
                             await self._handle_system_message(connection, raw)
 
@@ -341,6 +376,22 @@ def parse_hdfscnt0(raw: str) -> tuple[Tick, ...]:
     단일 Tick이 아니라 tuple이다.
     """
 
+    return tuple(event.tick for event in parse_hdfscnt0_events(raw))
+
+
+def parse_hdfscnt0_events(
+    raw: str, *, received_at: datetime | None = None
+) -> tuple[KISTickEvent, ...]:
+    """HDFSCNT0 원문을 Landing 저장용 Tick 이벤트로 변환한다.
+
+    ``received_at``을 넘기면 WebSocket frame을 받은 단일 시각을 모든 이벤트에
+    사용한다. 테스트·리플레이에서는 재현 가능한 값을 주입할 수 있다.
+    """
+
+    captured_at = received_at or datetime.now(UTC)
+    if captured_at.tzinfo is None:
+        raise KISProtocolError("KIS Tick received_at은 timezone-aware datetime이어야 합니다.")
+
     envelope = raw.split("|", maxsplit=3)
     if len(envelope) != 4 or envelope[0] != "0" or envelope[1] != HDFSCNT0:
         raise KISProtocolError("HDFSCNT0 데이터 envelope 형식이 올바르지 않습니다.")
@@ -359,11 +410,12 @@ def parse_hdfscnt0(raw: str) -> tuple[Tick, ...]:
             f"HDFSCNT0 필드 수가 맞지 않습니다: 수신 {len(values)}개, 기대 {expected_value_count}개"
         )
 
-    ticks: list[Tick] = []
+    events: list[KISTickEvent] = []
     for offset in range(0, len(values), len(HDFSCNT0_COLUMNS)):
-        row = dict(
+        raw_fields = tuple(
             zip(HDFSCNT0_COLUMNS, values[offset : offset + len(HDFSCNT0_COLUMNS)], strict=True)
         )
+        row = dict(raw_fields)
         try:
             price = Decimal(row["LAST"])
         except (InvalidOperation, ValueError) as exc:
@@ -374,15 +426,19 @@ def parse_hdfscnt0(raw: str) -> tuple[Tick, ...]:
         symbol = row["SYMB"].strip()
         if not symbol:
             raise KISProtocolError("HDFSCNT0 종목코드(SYMB)가 비어 있습니다.")
-        ticks.append(
-            Tick(
-                symbol=symbol,
-                price=price,
-                ts=_parse_kis_timestamp(row["KYMD"], row["KHMS"]),
-                source=KIS_SOURCE,
+        events.append(
+            KISTickEvent(
+                tick=Tick(
+                    symbol=symbol,
+                    price=price,
+                    ts=_parse_kis_timestamp(row["KYMD"], row["KHMS"]),
+                    source=KIS_SOURCE,
+                ),
+                received_at=captured_at,
+                source_fields=raw_fields,
             )
         )
-    return tuple(ticks)
+    return tuple(events)
 
 
 def _parse_kis_timestamp(korean_date: str, korean_time: str) -> datetime:
